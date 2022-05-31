@@ -1,11 +1,11 @@
 import 'dart:developer' as developer;
 import 'dart:html' as html;
+import 'dart:js_util' as js_util;
+
+enum MotionApis { deviceMotion, sensorApi }
 
 /// Receive permission status of the API.
-Future<void> checkPermission(
-  Function initSensor, {
-  String? permissionName,
-}) async {
+Future<MotionApis?> checkPermission({String? permissionName}) async {
   final permission = html.window.navigator.permissions;
 
   // Check if browser supports this API or supports permission manager
@@ -19,8 +19,7 @@ Future<void> checkPermission(
       );
       switch (permissionStatus.state) {
         case 'granted':
-          initSensor();
-          break;
+          return MotionApis.sensorApi;
         case 'prompt':
           // user needs to interact with this
           developer.log(
@@ -35,10 +34,21 @@ Future<void> checkPermission(
       developer.log(
           'Integration with Permissions API is not enabled, still trying to start app.',
           error: e);
-      initSensor();
     }
   } else {
+    const deviceMotionEvent = html.DeviceMotionEvent;
+    if (js_util.hasProperty(deviceMotionEvent, 'requestPermission')) {
+      final promise =
+          js_util.callMethod(deviceMotionEvent, 'requestPermission', []);
+      final result = await js_util.promiseToFuture(promise);
+      if (result == "granted") {
+        return MotionApis.deviceMotion;
+      } else {
+        return null;
+      }
+    }
     developer.log('No Permissions API, still try to start app.');
-    initSensor();
+    return MotionApis.sensorApi;
   }
+  return null;
 }

@@ -1,12 +1,20 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:html' as html
-    show LinearAccelerationSensor, Accelerometer, Gyroscope, Magnetometer;
+    show
+        LinearAccelerationSensor,
+        Accelerometer,
+        Gyroscope,
+        Magnetometer,
+        DeviceMotionEvent,
+        DeviceRotationRate,
+        window;
 import 'dart:js';
 import 'dart:js_util';
 
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:sensors_plus_platform_interface/sensors_plus_platform_interface.dart';
+import 'package:sensors_plus_web/src/utils.dart';
 
 /// The sensors plugin.
 class SensorsPlugin extends SensorsPlatform {
@@ -21,9 +29,19 @@ class SensorsPlugin extends SensorsPlatform {
     String? apiName,
     String? permissionName,
     Function? onError,
-  }) {
+    Function? initDeviceMotion,
+  }) async {
     try {
-      initSensor();
+      if (initDeviceMotion != null) {
+        final motionApi = await checkPermission(permissionName: permissionName);
+        if (motionApi == MotionApis.deviceMotion) {
+          initDeviceMotionSensor();
+        } else {
+          initSensor();
+        }
+      } else {
+        initSensor();
+      }
     } catch (error) {
       if (onError != null) {
         onError();
@@ -67,17 +85,7 @@ class SensorsPlugin extends SensorsPlatform {
           setProperty(
             accelerometer,
             'onreading',
-            allowInterop(
-              (_) {
-                _accelerometerStreamController!.add(
-                  AccelerometerEvent(
-                    accelerometer.x as double,
-                    accelerometer.y as double,
-                    accelerometer.z as double,
-                  ),
-                );
-              },
-            ),
+            allowInterop((_) => addAccelerometerEvent(accelerometer)),
           );
 
           accelerometer.start();
@@ -93,6 +101,7 @@ class SensorsPlugin extends SensorsPlatform {
         onError: () {
           _accelerometerStreamController!.add(AccelerometerEvent(0, 0, 0));
         },
+        initDeviceMotion: initDeviceMotionSensor,
       );
       _accelerometerResultStream =
           _accelerometerStreamController!.stream.asBroadcastStream();
@@ -112,21 +121,8 @@ class SensorsPlugin extends SensorsPlatform {
         () {
           final gyroscope = html.Gyroscope();
 
-          setProperty(
-            gyroscope,
-            'onreading',
-            allowInterop(
-              (_) {
-                _gyroscopeEventStreamController!.add(
-                  GyroscopeEvent(
-                    gyroscope.x as double,
-                    gyroscope.y as double,
-                    gyroscope.z as double,
-                  ),
-                );
-              },
-            ),
-          );
+          setProperty(gyroscope, 'onreading',
+              allowInterop((_) => addGyroscopeEvent(gyroscope)));
 
           gyroscope.start();
 
@@ -141,6 +137,7 @@ class SensorsPlugin extends SensorsPlatform {
         onError: () {
           _gyroscopeEventStreamController!.add(GyroscopeEvent(0, 0, 0));
         },
+        initDeviceMotion: initDeviceMotionSensor,
       );
       _gyroscopeEventResultStream =
           _gyroscopeEventStreamController!.stream.asBroadcastStream();
@@ -165,16 +162,7 @@ class SensorsPlugin extends SensorsPlatform {
             linearAccelerationSensor,
             'onreading',
             allowInterop(
-              (_) {
-                _userAccelerometerStreamController!.add(
-                  UserAccelerometerEvent(
-                    linearAccelerationSensor.x as double,
-                    linearAccelerationSensor.y as double,
-                    linearAccelerationSensor.z as double,
-                  ),
-                );
-              },
-            ),
+                (_) => addUserAccelerometerEvent(linearAccelerationSensor)),
           );
 
           linearAccelerationSensor.start();
@@ -191,6 +179,7 @@ class SensorsPlugin extends SensorsPlatform {
           _userAccelerometerStreamController!
               .add(UserAccelerometerEvent(0, 0, 0));
         },
+        initDeviceMotion: initDeviceMotionSensor,
       );
       _userAccelerometerResultStream =
           _userAccelerometerStreamController!.stream.asBroadcastStream();
@@ -213,17 +202,7 @@ class SensorsPlugin extends SensorsPlatform {
           setProperty(
             magnetometerSensor,
             'onreading',
-            allowInterop(
-              (_) {
-                _magnetometerStreamController!.add(
-                  MagnetometerEvent(
-                    magnetometerSensor.x as double,
-                    magnetometerSensor.y as double,
-                    magnetometerSensor.z as double,
-                  ),
-                );
-              },
-            ),
+            allowInterop((_) => addMagnetometerEvent(magnetometerSensor)),
           );
 
           magnetometerSensor.start();
@@ -245,5 +224,52 @@ class SensorsPlugin extends SensorsPlatform {
     }
 
     return _magnetometerResultStream;
+  }
+
+  void initDeviceMotionSensor() {
+    _accelerometerStreamController ??= StreamController<AccelerometerEvent>();
+    _userAccelerometerStreamController ??=
+        StreamController<UserAccelerometerEvent>();
+    _gyroscopeEventStreamController ??= StreamController<GyroscopeEvent>();
+    callMethod(html.window, 'addEventListener', [
+      'devicemotion',
+      allowInterop(
+        (html.DeviceMotionEvent event) {
+          addAccelerometerEvent(event.accelerationIncludingGravity);
+          addUserAccelerometerEvent(event.acceleration);
+          addGyroscopeEvent(event.rotationRate);
+        },
+      ),
+    ]);
+  }
+
+  void addAccelerometerEvent(rawEvent) {
+    final createdEvent = AccelerometerEvent(rawEvent?.x ?? 0 as double,
+        rawEvent?.y ?? 0 as double, rawEvent?.z ?? 0 as double);
+    _accelerometerStreamController!.add(createdEvent);
+  }
+
+  void addGyroscopeDeviceMotionEvent(html.DeviceRotationRate rawEvent) {
+    final createdEvent = GyroscopeEvent(rawEvent.alpha as double,
+        rawEvent.beta as double, rawEvent.gamma as double);
+    _gyroscopeEventStreamController!.add(createdEvent);
+  }
+
+  void addGyroscopeEvent(rawEvent) {
+    final createdEvent = GyroscopeEvent(rawEvent?.x ?? 0 as double,
+        rawEvent?.y ?? 0 as double, rawEvent?.z ?? 0 as double);
+    _gyroscopeEventStreamController!.add(createdEvent);
+  }
+
+  void addUserAccelerometerEvent(rawEvent) {
+    final createdEvent = UserAccelerometerEvent(rawEvent?.x ?? 0 as double,
+        rawEvent?.y ?? 0 as double, rawEvent?.z ?? 0 as double);
+    _userAccelerometerStreamController!.add(createdEvent);
+  }
+
+  void addMagnetometerEvent(rawEvent) {
+    final createdEvent = MagnetometerEvent(rawEvent?.x ?? 0 as double,
+        rawEvent?.y ?? 0 as double, rawEvent?.z ?? 0 as double);
+    _magnetometerStreamController!.add(createdEvent);
   }
 }
